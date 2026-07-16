@@ -130,7 +130,8 @@ impl WeixinParser {
                 if !t.is_empty() {
                     t
                 } else {
-                    self.extract_first_heading(&content_markdown).unwrap_or_default()
+                    self.extract_first_heading(&content_markdown)
+                        .unwrap_or_default()
                 }
             }
         };
