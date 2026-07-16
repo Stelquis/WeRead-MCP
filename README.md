@@ -67,7 +67,13 @@ cargo build --release
 
 ## 🚀 快速开始
 
-### 1. 配置 MCP 客户端
+本 MCP 支持两种使用方式，根据你的场景选择：
+
+### 方式一：通过 AI 客户端（推荐）
+
+这是标准 MCP 工作流，**爬取 + 润色排版 + 写回**一步到位。
+
+#### 1. 配置 MCP 客户端
 
 将以下配置添加到你的 AI 客户端 MCP 配置中：
 
@@ -95,26 +101,52 @@ cargo build --release
 }
 ```
 
-### 2. 调用工具
+**Cursor**：设置 → MCP → Add New MCP Server
 
-在 AI 客户端中调用 `read_weixin_article` 工具，传入微信文章 URL：
+**OpenCode**：项目根目录 `.mcp.json`
 
-```json
-{
-  "url": "https://mp.weixin.qq.com/s/xxx"
-}
-```
+#### 2. 在 AI 客户端中调用
 
-### 3. 查看输出
+直接对 AI 说类似以下指令：
+
+> "帮我读这篇微信文章，先完整爬取，然后通读全文，优化排版和语言，最后把润色后的内容写回 article.md 文件"
+>
+> 文章链接：https://mp.weixin.qq.com/s/xxx
+
+AI 客户端会自动执行完整流程：
+1. 调用 `read_weixin_article` 工具爬取文章、下载图片
+2. 读取输出的 `article.md` 文件
+3. 通读全文，优化排版（标题层级、代码块、列表、段落等）
+4. 润色语言（修正标点、统一术语、修复排版错误）
+5. 将润色后的内容写回 `article.md`
+
+#### 3. 查看输出
 
 ```
 ./output/<文章标题>/
-├── article.md         ← 结构化 Markdown（含本地图片路径）
+├── article.md         ← 结构化 Markdown（AI 润色后）
 └── images/            ← 本地图片文件
     ├── image_0.jpg
     ├── image_1.png
     └── ...
 ```
+
+### 方式二：通过 Python 脚本直接调用
+
+适用于自动化脚本、定时任务、或在不支持 MCP 的环境中使用。**此方式只爬取原始内容，不包含 AI 润色。**
+
+```bash
+# 编译
+cargo build --release
+
+# 修改 test_mcp.py 中的 URL 后运行
+python3 test_mcp.py
+
+# 或直接通过 stdio 交互
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./target/release/weread-mcp
+```
+
+`test_mcp.py` 会按 MCP 协议与服务器通信，将结果保存到 `output.json` 并打印到控制台。如需润色，需自行处理。
 
 ---
 
@@ -179,17 +211,17 @@ weread-mcp
 
 ---
 
-## 🧪 本地测试
+## 🧪 本地开发测试
 
 ```bash
 # 编译
 cargo build --release
 
-# 运行 MCP 协议测试（需先修改 test_mcp.py 中的 URL）
-python3 test_mcp.py
-
-# 或直接通过 stdio 交互测试
+# 快速测试 MCP 协议是否正常
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./target/release/weread-mcp
+
+# 运行 Rust 单元测试
+cargo test
 ```
 
 ---

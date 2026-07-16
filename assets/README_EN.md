@@ -67,7 +67,13 @@ Binary: `./target/release/weread-mcp`
 
 ## 🚀 Quick Start
 
-### 1. Configure MCP Client
+This MCP supports two usage modes depending on your scenario:
+
+### Mode 1: Via AI Client (Recommended)
+
+The standard MCP workflow — **fetch + polish + write back** in one go.
+
+#### 1. Configure MCP Client
 
 Add the following to your AI client's MCP configuration:
 
@@ -95,26 +101,53 @@ Add the following to your AI client's MCP configuration:
 }
 ```
 
-### 2. Call the Tool
+**Cursor**: Settings → MCP → Add New MCP Server
 
-Invoke `read_weixin_article` with a WeChat article URL:
+**OpenCode**: `.mcp.json` in project root
 
-```json
-{
-  "url": "https://mp.weixin.qq.com/s/xxx"
-}
-```
+#### 2. Invoke from AI Client
 
-### 3. View Output
+Simply tell your AI something like:
+
+> "Read this WeChat article, fetch the full content, then polish the formatting and language, and write the result back to article.md"
+>
+> URL: https://mp.weixin.qq.com/s/xxx
+
+The AI client will automatically:
+1. Call `read_weixin_article` to fetch the article and download images
+2. Read the output `article.md` file
+3. Read through the full content
+4. Optimize formatting (headings, code blocks, lists, paragraphs)
+5. Polish language (fix punctuation, unify terminology, fix layout issues)
+6. Write the polished content back to `article.md`
+
+#### 3. View Output
 
 ```
 ./output/<article-title>/
-├── article.md         ← Structured Markdown (with local image paths)
+├── article.md         ← Structured Markdown (AI-polished)
 └── images/            ← Local image files
     ├── image_0.jpg
     ├── image_1.png
     └── ...
 ```
+
+### Mode 2: Via Python Script (Direct Call)
+
+For automation scripts, cron jobs, or environments without MCP client support. **This mode only fetches raw content, no AI polishing.**
+
+```bash
+# Build
+cargo build --release
+
+# Edit the URL in test_mcp.py and run
+python3 test_mcp.py
+
+# Or interact via stdio directly
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./target/release/weread-mcp
+```
+
+`test_mcp.py` communicates with the server via the MCP protocol, saves results to `output.json` and prints to console. For polishing, you'll need to handle it separately.
 
 ---
 
@@ -179,17 +212,17 @@ Read a WeChat Official Account article.
 
 ---
 
-## 🧪 Local Testing
+## 🧪 Local Development
 
 ```bash
 # Build
 cargo build --release
 
-# Run MCP protocol test (edit URL in test_mcp.py first)
-python3 test_mcp.py
-
-# Or test via stdio directly
+# Quick MCP protocol test
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./target/release/weread-mcp
+
+# Run Rust unit tests
+cargo test
 ```
 
 ---
