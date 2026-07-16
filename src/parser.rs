@@ -129,10 +129,8 @@ impl WeixinParser {
                 let t = self.extract_text(&document, title_selectors(), "");
                 if !t.is_empty() {
                     t
-                } else if let Some(h) = self.extract_first_heading(&content_markdown) {
-                    h
                 } else {
-                    String::new()
+                    self.extract_first_heading(&content_markdown).unwrap_or_default()
                 }
             }
         };
@@ -153,7 +151,8 @@ impl WeixinParser {
         // 发布时间兜底：尝试 meta 标签
         let publish_time = if !publish_time.is_empty() {
             publish_time
-        } else if let Some(t) = self.extract_meta_content(&document, "article:published_time")
+        } else if let Some(t) = self
+            .extract_meta_content(&document, "article:published_time")
             .or_else(|| self.extract_meta_content(&document, "og:updated_time"))
         {
             t
@@ -319,7 +318,8 @@ impl WeixinParser {
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     // 纯粗体段落视为 H3 子标题
-                    if trimmed.starts_with("**") && trimmed.ends_with("**")
+                    if trimmed.starts_with("**")
+                        && trimmed.ends_with("**")
                         && trimmed.matches("**").count() == 2
                     {
                         let heading = &trimmed[2..trimmed.len() - 2];
@@ -419,8 +419,7 @@ impl WeixinParser {
                 let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
-                    let quoted: Vec<String> =
-                        trimmed.lines().map(|l| format!("> {}", l)).collect();
+                    let quoted: Vec<String> = trimmed.lines().map(|l| format!("> {}", l)).collect();
                     parts.push(quoted.join("\n"));
                     parts.push("\n\n".to_string());
                 }
@@ -465,8 +464,7 @@ impl WeixinParser {
             }
 
             // 表格行/单元格：由 process_table 统一处理，递归时跳过加粗等样式
-            "tr" | "th" | "td" | "thead" | "tbody" | "tfoot" | "caption" | "colgroup"
-            | "col" => {
+            "tr" | "th" | "td" | "thead" | "tbody" | "tfoot" | "caption" | "colgroup" | "col" => {
                 let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {

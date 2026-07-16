@@ -3,16 +3,12 @@
 //! 负责 MCP 工具注册、URL 校验、响应构造、输出目录管理。
 //! 通过 `read_weixin_article` 工具对外提供微信公众号文章读取能力。
 
-use rmcp::{
-    ServerHandler,
-    handler::server::tool::ToolRouter,
-    model::*,
-    tool, tool_handler, tool_router,
-    schemars,
-};
 use rmcp::handler::server::wrapper::Parameters;
+use rmcp::{
+    handler::server::tool::ToolRouter, model::*, schemars, tool, tool_handler, tool_router,
+    ServerHandler,
+};
 use std::path::Path;
-use tracing;
 
 use crate::scraper::WeixinScraper;
 
@@ -58,11 +54,10 @@ impl WeixinServer {
 #[tool_router]
 impl WeixinServer {
     /// 读取微信公众号文章内容
-    #[tool(description = "读取微信公众号文章内容。接收一个微信文章 URL，提取结构化内容（标题、作者、正文 Markdown、图片列表）。URL 必须以 https://mp.weixin.qq.com/s/ 开头。自动将文章 Markdown 和图片下载到 ./output/<文章标题>/ 目录下。返回：title, author, publish_time, content(纯文本), content_markdown(带格式), images(图片URL列表), output(本地文件路径信息)。\n\n【AI 处理流程】当你拿到返回的 content_markdown 和 output.markdown_path 后，请按以下步骤处理：\n1. 读取 output.markdown_path 指向的 article.md 文件（包含完整正文和本地图片引用）\n2. 从头到尾通读全文，理解文章结构和内容逻辑\n3. 对 Markdown 进行排版优化：\n   - 确保标题层级合理（H1 文章标题、H2 章节、H3 子章节）\n   - 修正代码块、引用、列表的格式\n   - 合并/拆分过短或过长的段落\n   - 修正图片 alt 文本为空的问题\n4. 对内容进行润色：\n   - 修正明显的中英文标点混用\n   - 统一术语表述\n   - 修复明显的排版错误（多余空格、换行等）\n5. 输出最终润色后的 Markdown 内容")]
-    async fn read_weixin_article(
-        &self,
-        Parameters(req): Parameters<ReadArticleRequest>,
-    ) -> String {
+    #[tool(
+        description = "读取微信公众号文章内容。接收一个微信文章 URL，提取结构化内容（标题、作者、正文 Markdown、图片列表）。URL 必须以 https://mp.weixin.qq.com/s/ 开头。自动将文章 Markdown 和图片下载到 ./output/<文章标题>/ 目录下。返回：title, author, publish_time, content(纯文本), content_markdown(带格式), images(图片URL列表), output(本地文件路径信息)。\n\n【AI 处理流程】当你拿到返回的 content_markdown 和 output.markdown_path 后，请按以下步骤处理：\n1. 读取 output.markdown_path 指向的 article.md 文件（包含完整正文和本地图片引用）\n2. 从头到尾通读全文，理解文章结构和内容逻辑\n3. 对 Markdown 进行排版优化：\n   - 确保标题层级合理（H1 文章标题、H2 章节、H3 子章节）\n   - 修正代码块、引用、列表的格式\n   - 合并/拆分过短或过长的段落\n   - 修正图片 alt 文本为空的问题\n4. 对内容进行润色：\n   - 修正明显的中英文标点混用\n   - 统一术语表述\n   - 修复明显的排版错误（多余空格、换行等）\n5. 输出最终润色后的 Markdown 内容"
+    )]
+    async fn read_weixin_article(&self, Parameters(req): Parameters<ReadArticleRequest>) -> String {
         let url = req.url;
 
         // 1. URL 校验
@@ -76,7 +71,8 @@ impl WeixinServer {
             return serde_json::json!({
                 "success": false,
                 "error": error_msg
-            }).to_string();
+            })
+            .to_string();
         }
 
         tracing::info!("Fetching article: {}", url);
@@ -117,20 +113,23 @@ impl WeixinServer {
                     });
                 } else {
                     // 下载图片
-                    let dl_result = self.scraper
+                    let dl_result = self
+                        .scraper
                         .download_images(&article.images, &output_path)
                         .await;
 
                     match dl_result {
                         Ok(url_to_file) => {
                             // 写入 Markdown 文件（含本地图片路径）
-                            let md_result = self.scraper
+                            let md_result = self
+                                .scraper
                                 .write_article_output(&article, &output_path, &url_to_file)
                                 .await;
 
                             match md_result {
                                 Ok(md_path) => {
-                                    let downloaded: Vec<String> = url_to_file.values().cloned().collect();
+                                    let downloaded: Vec<String> =
+                                        url_to_file.values().cloned().collect();
                                     response["output"] = serde_json::json!({
                                         "success": true,
                                         "markdown_path": md_path,
@@ -140,7 +139,8 @@ impl WeixinServer {
                                     tracing::info!("文章已输出到: {}", md_path);
                                 }
                                 Err(e) => {
-                                    let downloaded: Vec<String> = url_to_file.values().cloned().collect();
+                                    let downloaded: Vec<String> =
+                                        url_to_file.values().cloned().collect();
                                     response["output"] = serde_json::json!({
                                         "success": false,
                                         "error": format!("Markdown 写入失败: {}", e),
@@ -166,7 +166,8 @@ impl WeixinServer {
                 serde_json::json!({
                     "success": false,
                     "error": e.to_string()
-                }).to_string()
+                })
+                .to_string()
             }
         }
     }

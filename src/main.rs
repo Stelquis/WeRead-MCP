@@ -8,7 +8,7 @@ mod parser;
 mod scraper;
 mod server;
 
-use rmcp::{ServiceExt, transport::stdio};
+use rmcp::{transport::stdio, ServiceExt};
 use server::WeixinServer;
 
 #[tokio::main]
@@ -22,12 +22,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Starting WeRead MCP Server...");
 
     // 创建服务器实例并通过 stdio 传输启动 MCP 服务
-    let service = WeixinServer::new()
-        .serve(stdio())
-        .await
-        .inspect_err(|e| {
-            tracing::error!("Failed to start MCP server: {}", e);
-        })?;
+    let service = WeixinServer::new().serve(stdio()).await.inspect_err(|e| {
+        tracing::error!("Failed to start MCP server: {}", e);
+    })?;
 
     // 阻塞等待服务结束
     service.waiting().await?;
