@@ -6,12 +6,13 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)]()
 [![Rust](https://img.shields.io/badge/rust-2024-edition?logo=rust)](https://www.rust-lang.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-purple)](https://modelcontextprotocol.io/)
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/Stelquis/WeRead-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/Stelquis/WeRead-MCP/actions/workflows/ci.yml)
 
 > A Rust-based MCP server for reading WeChat Official Account articles.
 > Pure HTTP requests, no browser needed, auto-downloads images, outputs structured Markdown.
 
-[中文](./README.md) · [Report Bug](https://github.com/your-repo/issues) · [Request Feature](https://github.com/your-repo/issues)
+[中文](../README.md) · [Report Bug](https://github.com/Stelquis/WeRead-MCP/issues/new?template=bug_report.md) · [Request Feature](https://github.com/Stelquis/WeRead-MCP/issues/new?template=feature_request.md)
 
 ---
 
@@ -25,7 +26,7 @@
 ### Build
 
 ```bash
-git clone https://github.com/your-repo/WeRead-MCP.git
+git clone https://github.com/Stelquis/WeRead-MCP.git
 cd WeRead-MCP
 cargo build --release
 ```

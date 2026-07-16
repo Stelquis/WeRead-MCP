@@ -3,12 +3,13 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)]()
 [![Rust](https://img.shields.io/badge/rust-2024-edition?logo=rust)](https://www.rust-lang.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-purple)](https://modelcontextprotocol.io/)
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/Stelquis/WeRead-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/Stelquis/WeRead-MCP/actions/workflows/ci.yml)
 
 > 一个基于 Rust 的 MCP 服务器，用于读取微信公众号文章。
 > 纯 HTTP 请求，无需 Chrome 浏览器，自动下载图片到本地，输出结构化 Markdown。
 
-[English](./assets/readme_en.md) · [报告 Bug](https://github.com/your-repo/issues) · [提出功能](https://github.com/your-repo/issues)
+[English](./assets/README_EN.md) · [报告 Bug](https://github.com/Stelquis/WeRead-MCP/issues/new?template=bug_report.md) · [提出功能](https://github.com/Stelquis/WeRead-MCP/issues/new?template=feature_request.md)
 
 ---
 
@@ -22,7 +23,7 @@
 ### 编译
 
 ```bash
-git clone https://github.com/your-repo/WeRead-MCP.git
+git clone https://github.com/Stelquis/WeRead-MCP.git
 cd WeRead-MCP
 cargo build --release
 ```
