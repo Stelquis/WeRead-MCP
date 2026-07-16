@@ -1,31 +1,31 @@
 ---
-name: Bug Report
-about: Create a report to help us improve
+name: Bug 报告
+about: 提交 Bug 帮助我们改进
 title: ''
 labels: bug
 assignees: ''
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**描述 Bug**
+清晰简洁地描述这个 Bug 是什么。
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Run `...`
-2. Call tool with URL `...`
-3. See error
+**复现步骤**
+复现行为的步骤：
+1. 运行 `...`
+2. 用 URL `...` 调用工具
+3. 看到错误
 
-**Expected behavior**
-A clear description of what you expected to happen.
+**期望行为**
+清晰描述你期望发生的事情。
 
-**Environment:**
-- OS: [e.g. Ubuntu 22.04, macOS 14]
-- Rust version: `rustc --version`
-- WeRead MCP version: [e.g. 1.0.0]
+**运行环境：**
+- 操作系统：[例如 Ubuntu 22.04, macOS 14]
+- Rust 版本：`rustc --version`
+- WeRead MCP 版本：[例如 1.0.0]
 
-**Logs**
-If applicable, add logs (from stderr output).
+**日志**
+如有相关日志，请附上（来自 stderr 输出）。
 
-**Additional context**
-Add any other context about the problem here.
+**补充说明**
+其他有助于解决问题的上下文。

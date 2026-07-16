@@ -1,14 +1,14 @@
-# Changelog
+# 更新日志
 
 ## [1.0.0] - 2026-07-16
 
-### Added
+### 新增
 
-- Initial release of WeRead MCP
-- `read_weixin_article` tool for reading WeChat Official Account articles
-- Pure HTTP requests, no browser required
-- HTML to Markdown conversion with table, formula, code block support
-- Auto-download images to local storage
-- Structured output in `./output/<title>/` directory
-- MCP protocol standard compliance
-- Full Chinese and English documentation
+- 首次发布 WeRead MCP
+- `read_weixin_article` 工具，用于读取微信公众号文章
+- 纯 HTTP 请求，无需浏览器
+- HTML 转 Markdown，支持表格、公式、代码块
+- 自动下载图片到本地
+- 结构化输出到 `./output/<文章标题>/` 目录
+- 兼容 MCP 协议标准
+- 完整的中英文文档
