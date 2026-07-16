@@ -598,3 +598,47 @@ fn elem_attr(el: &scraper::node::Element, name: &str) -> Option<String> {
         .find(|(n, _)| &*n.local == name)
         .map(|(_, v)| v.to_string())
 }
+
+// ── 单元测试 ──
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_first_heading_skips_code_blocks() {
+        let parser = WeixinParser::new();
+        let md = "一些正文\n\n```\n# 这是代码块内的标题\n```\n\n# 这是真正的标题";
+        assert_eq!(
+            parser.extract_first_heading(md),
+            Some("这是真正的标题".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_first_heading_no_heading() {
+        let parser = WeixinParser::new();
+        let md = "只有正文，没有标题";
+        assert_eq!(parser.extract_first_heading(md), None);
+    }
+
+    #[test]
+    fn test_extract_first_heading_empty() {
+        let parser = WeixinParser::new();
+        assert_eq!(parser.extract_first_heading(""), None);
+    }
+
+    #[test]
+    fn test_clean_text_collapses_newlines() {
+        let parser = WeixinParser::new();
+        let result = parser.clean_text("hello\n\n\n\nworld");
+        assert_eq!(result, "hello\n\nworld");
+    }
+
+    #[test]
+    fn test_clean_text_collapses_spaces() {
+        let parser = WeixinParser::new();
+        let result = parser.clean_text("hello    world");
+        assert_eq!(result, "hello world");
+    }
+}

@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""MCP stdio (NDJSON) client for testing weixin-mcp-rs"""
+"""MCP stdio (NDJSON) client for testing weixin-mcp-rs
+
+Usage:
+    python3 test_mcp.py <URL>
+    python3 test_mcp.py --binary /path/to/weread-mcp <URL>
+
+Examples:
+    python3 test_mcp.py https://mp.weixin.qq.com/s/xxx
+    python3 test_mcp.py --binary ./target/release/weread-mcp https://mp.weixin.qq.com/s/xxx
+"""
 import subprocess
 import json
 import sys
 import os
 import time
-
-BINARY = "/workspace/Repo/WeRead-MCP/target/release/weread-mcp"
-URL = "https://mp.weixin.qq.com/s/wm_LM83gyLM-auidBxprZw"
+import argparse
+from pathlib import Path
 
 
 def send_msg(proc, msg):
@@ -37,132 +45,196 @@ def read_msg(proc, timeout=300):
     return json.loads(line)
 
 
-print("=" * 60)
-print("Starting weixin-mcp-rs MCP server (NDJSON)...")
-print("=" * 60)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="WeRead MCP 协议测试工具 — 调用 MCP 服务器爬取微信文章",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  %(prog)s https://mp.weixin.qq.com/s/xxx
+  %(prog)s --binary ./target/release/weread-mcp https://mp.weixin.qq.com/s/xxx
+  %(prog)s --binary ./target/release/weread-mcp --output ./my-output https://mp.weixin.qq.com/s/xxx
+        """,
+    )
+    parser.add_argument(
+        "--binary",
+        default=os.environ.get(
+            "WEREAD_MCP_BINARY",
+            "/workspace/Repo/WeRead-MCP/target/release/weread-mcp",
+        ),
+        help="MCP 服务器二进制路径（默认: %(default)s，也可通过环境变量 WEREAD_MCP_BINARY 设置）",
+    )
+    parser.add_argument(
+        "--output",
+        default=os.environ.get("WEREAD_MCP_OUTPUT", ""),
+        help="结果 JSON 输出路径（默认: 不保存文件）",
+    )
+    parser.add_argument(
+        "url",
+        nargs="?",
+        default="https://mp.weixin.qq.com/s/wm_LM83gyLM-auidBxprZw",
+        help="微信文章 URL（默认: 内置测试 URL）",
+    )
+    return parser.parse_args()
 
-proc = subprocess.Popen(
-    [BINARY],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    text=True,
-    bufsize=1,  # line-buffered
-)
 
-time.sleep(0.5)
-if proc.poll() is not None:
-    print(f"Server died on startup! Exit: {proc.returncode}")
-    print("Stderr:", proc.stderr.read()[:2000])
-    sys.exit(1)
+def main():
+    args = parse_args()
+    binary = args.binary
+    url = args.url
+    output_path = args.output
 
-# Step 1: Initialize
-print("1. Sending: initialize ...")
-send_msg(proc, {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-        "protocolVersion": "2025-11-25",
-        "capabilities": {},
-        "clientInfo": {"name": "test-client", "version": "1.0"}
-    }
-})
+    print("=" * 60)
+    print(f"🚀 WeRead MCP 测试工具")
+    print(f"   Binary: {binary}")
+    print(f"   URL:    {url}")
+    print("=" * 60)
 
-resp = read_msg(proc, timeout=10)
-if resp:
-    print(f"   ✅ Initialized: server={resp['result']['serverInfo']['name']}")
-else:
-    print("   ❌ No response"); sys.exit(1)
+    # 检查二进制是否存在
+    if not os.path.isfile(binary):
+        print(f"❌ 二进制文件不存在: {binary}")
+        print("   请先编译: cargo build --release")
+        sys.exit(1)
 
-# Step 2: Initialized notification
-print("2. Sending: notifications/initialized ...")
-send_msg(proc, {
-    "jsonrpc": "2.0",
-    "method": "notifications/initialized"
-})
+    proc = subprocess.Popen(
+        [binary],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
 
-# Step 3: tools/list
-print("3. Sending: tools/list ...")
-send_msg(proc, {
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/list",
-    "params": {}
-})
-resp = read_msg(proc, timeout=10)
-tools = resp.get("result", {}).get("tools", []) if resp else []
-tool_names = [t["name"] for t in tools]
-print(f"   ✅ Tools: {tool_names}")
+    time.sleep(0.5)
+    if proc.poll() is not None:
+        print(f"❌ 服务器启动失败! Exit: {proc.returncode}")
+        print("Stderr:", proc.stderr.read()[:2000])
+        sys.exit(1)
 
-# Step 4: Call read_weixin_article
-print(f"\n4. Calling: read_weixin_article ...")
-print(f"   URL: {URL}")
-send_msg(proc, {
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-        "name": "read_weixin_article",
-        "arguments": {"url": URL}
-    }
-})
+    # Step 1: Initialize
+    print("1. 初始化 MCP 连接...")
+    send_msg(proc, {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "1.0"}
+        }
+    })
+    resp = read_msg(proc, timeout=10)
+    if resp:
+        print(f"   ✅ 已连接: {resp['result']['serverInfo']['name']}")
+    else:
+        print("   ❌ 无响应")
+        sys.exit(1)
 
-print("   ⏳ Fetching article, please wait ...")
-sys.stdout.flush()
+    # Step 2: Initialized notification
+    print("2. 发送初始化通知...")
+    send_msg(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
 
-resp = read_msg(proc, timeout=300)
-if not resp:
-    print("   ❌ No response from server")
-    sys.exit(1)
+    # Step 3: tools/list
+    print("3. 获取工具列表...")
+    send_msg(proc, {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    })
+    resp = read_msg(proc, timeout=10)
+    tools = resp.get("result", {}).get("tools", []) if resp else []
+    tool_names = [t["name"] for t in tools]
+    print(f"   ✅ 可用工具: {tool_names}")
 
-result = resp.get("result", {})
-# MCP 返回格式: content 是 [{"type":"text","text":"{...}"}]
-content_list = result.get("content", [])
-if content_list and isinstance(content_list, list):
-    raw_text = content_list[0].get("text", "{}")
-else:
-    raw_text = str(content_list)
+    # Step 4: Call read_weixin_article
+    print(f"\n4. 调用 read_weixin_article...")
+    print(f"   URL: {url}")
+    send_msg(proc, {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "read_weixin_article",
+            "arguments": {"url": url}
+        }
+    })
 
-try:
-    data = json.loads(raw_text)
-except (json.JSONDecodeError, TypeError):
-    data = {"raw": str(raw_text)[:500]}
+    print("   ⏳ 正在爬取，请稍候...")
+    sys.stdout.flush()
 
-# Print results
-print("\n" + "=" * 60)
-print("📋 RESULTS")
-print("=" * 60)
+    resp = read_msg(proc, timeout=300)
+    if not resp:
+        print("   ❌ 无响应")
+        sys.exit(1)
 
-title = data.get("title", "N/A")
-author = data.get("author", "N/A")
-pub_time = data.get("publish_time", "N/A")
-print(f"\n📰 标题: {title}")
-print(f"✍️  作者: {author}")
-print(f"📅 时间: {pub_time}")
+    result = resp.get("result", {})
+    content_list = result.get("content", [])
+    if content_list and isinstance(content_list, list):
+        raw_text = content_list[0].get("text", "{}")
+    else:
+        raw_text = str(content_list)
 
-images = data.get("images", [])
-print(f"\n📸 图片 ({len(images)} 张):")
-for i, img in enumerate(images[:5], 1):
-    print(f"   [{i}] {img[:90]}...")
-if len(images) > 5:
-    print(f"   ... 还有 {len(images)-5} 张")
+    try:
+        data = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError):
+        data = {"raw": str(raw_text)[:500]}
 
-md = data.get("content_markdown", "")
-if md:
-    print(f"\n📝 Markdown 正文 (前 2500 字符):")
-    print("─" * 50)
-    print(md[:2500])
-    if len(md) > 2500:
-        print(f"   ... (共 {len(md)} 字符，已截断)")
+    # Print results
+    print("\n" + "=" * 60)
+    print("📋 结果")
+    print("=" * 60)
 
-print("\n" + "=" * 60)
-print("✅ DONE! Full result saved to output.json")
-print("=" * 60)
+    title = data.get("title", "N/A")
+    author = data.get("author", "N/A")
+    pub_time = data.get("publish_time", "N/A")
+    print(f"\n📰 标题: {title}")
+    print(f"✍️  作者: {author}")
+    print(f"📅 时间: {pub_time}")
 
-os.makedirs("/workspace/output/test-mcp", exist_ok=True)
-with open("/workspace/output/test-mcp/output.json", "w") as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
+    images = data.get("images", [])
+    print(f"\n📸 图片 ({len(images)} 张):")
+    for i, img in enumerate(images[:5], 1):
+        print(f"   [{i}] {img[:90]}...")
+    if len(images) > 5:
+        print(f"   ... 还有 {len(images)-5} 张")
 
-proc.terminate()
-proc.wait(timeout=5)
+    output_info = data.get("output", {})
+    if output_info.get("markdown_path"):
+        print(f"\n📁 输出目录: {os.path.dirname(output_info['markdown_path'])}")
+        print(f"   article.md: {output_info['markdown_path']}")
+        print(f"   images: {output_info['images_dir']}")
+        print(f"   下载图片: {len(output_info.get('downloaded_images', []))} 张")
+
+    md = data.get("content_markdown", "")
+    if md:
+        print(f"\n📝 Markdown 正文 (前 2500 字符):")
+        print("─" * 50)
+        print(md[:2500])
+        if len(md) > 2500:
+            print(f"   ... (共 {len(md)} 字符，已截断)")
+
+    # 保存结果到 JSON 文件
+    if output_path:
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"\n💾 结果已保存: {output_path}")
+    else:
+        out_dir = os.path.dirname(output_info.get("markdown_path", ""))
+        if out_dir:
+            json_path = os.path.join(out_dir, "result.json")
+            with open(json_path, "w") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"\n💾 结果已保存: {json_path}")
+
+    print("\n" + "=" * 60)
+    print("✅ 完成！")
+    print("=" * 60)
+
+    proc.terminate()
+    proc.wait(timeout=5)
+
+
+if __name__ == "__main__":
+    main()

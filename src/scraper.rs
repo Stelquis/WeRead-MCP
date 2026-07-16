@@ -5,24 +5,27 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Client;
 use tokio::fs;
+use tokio::sync::Semaphore;
 
 use crate::error::AppError;
 use crate::parser::{ArticleData, WeixinParser};
 
+/// 内存缓存大小上限（最多缓存 50 篇文章）
+const CACHE_MAX_SIZE: usize = 50;
+
 /// HTTP 请求管理器
 ///
 /// 使用纯 HTTP 请求获取文章 HTML，无需 Chrome/Chromium 浏览器。
-/// 优点：
-/// - 无环境依赖，启动毫秒级
-/// - 资源占用低（几十 KB vs 几百 MB）
-/// - 避免被微信反爬检测（浏览器指纹反而更容易被封）
+/// 包含一个简单的内存缓存，避免重复请求相同 URL。
 pub struct WeixinScraper {
     parser: WeixinParser,
     client: Client,
+    cache: std::sync::Mutex<HashMap<String, ArticleData>>,
 }
 
 impl WeixinScraper {
@@ -64,45 +67,100 @@ impl WeixinScraper {
         Self {
             parser: WeixinParser::new(),
             client,
+            cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
-    /// 获取微信文章内容
+    /// 获取微信文章内容（带缓存 + 重试）
     ///
-    /// 发送 HTTP GET 请求获取文章 HTML，交由解析器提取结构化数据。
+    /// 先检查内存缓存，命中则直接返回。未命中则发送 HTTP 请求，
+    /// 网络错误和非 200 状态码会触发重试（指数退避: 1s → 3s → 9s）。
     pub async fn fetch_article(&self, url: &str) -> Result<ArticleData, AppError> {
-        tracing::info!("Fetching article via HTTP: {}", url);
-
-        // 发送 HTTP 请求
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| AppError::HttpError(format!("Request failed: {}", e)))?;
-
-        // 检查 HTTP 状态码
-        if !response.status().is_success() {
-            return Err(AppError::HttpError(format!(
-                "HTTP {}: {}",
-                response.status().as_u16(),
-                response.status().canonical_reason().unwrap_or("unknown")
-            )));
+        // 1. 检查缓存
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some(cached) = cache.get(url) {
+                tracing::info!("缓存命中: {}", url);
+                return Ok(cached.clone());
+            }
         }
 
-        // 读取响应体
-        let html = response
-            .text()
-            .await
-            .map_err(|e| AppError::HttpError(format!("Read body failed: {}", e)))?;
+        // 2. 未命中，发起 HTTP 请求（带重试）
+        let article = self.fetch_article_http(url).await?;
 
-        tracing::info!("Got HTML ({} bytes), parsing...", html.len());
-        Ok(self.parser.parse(&html))
+        // 3. 存入缓存
+        {
+            let mut cache = self.cache.lock().unwrap();
+            // 缓存超过上限时，清空最旧的记录
+            if cache.len() >= CACHE_MAX_SIZE {
+                cache.clear();
+                tracing::info!("缓存已满，已清空");
+            }
+            cache.insert(url.to_string(), article.clone());
+        }
+
+        Ok(article)
     }
 
-    /// 下载文章中的图片到本地目录
+    /// 实际发送 HTTP 请求获取文章（带重试，最多 3 次，指数退避）
+    async fn fetch_article_http(&self, url: &str) -> Result<ArticleData, AppError> {
+        let max_retries = 3;
+        let mut last_err = None;
+
+        for attempt in 1..=max_retries {
+            if attempt > 1 {
+                let delay = Duration::from_secs(3u64.pow(attempt as u32 - 2));
+                tracing::info!("重试 [{}/{}]: 等待 {:.1}s 后重试...", attempt, max_retries, delay.as_secs_f64());
+                tokio::time::sleep(delay).await;
+            }
+
+            tracing::info!("正在获取文章 [尝试 {}/{}]: {}", attempt, max_retries, url);
+
+            match self.client.get(url).send().await {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        let err = AppError::HttpStatusError {
+                            status: response.status().as_u16(),
+                            message: response.status().canonical_reason().unwrap_or("unknown").to_string(),
+                        };
+                        tracing::warn!("{}", err);
+                        last_err = Some(err);
+                        continue;
+                    }
+
+                    match response.text().await {
+                        Ok(html) => {
+                            tracing::info!("获取成功 ({} bytes), 正在解析...", html.len());
+                            return Ok(self.parser.parse(&html));
+                        }
+                        Err(e) => {
+                            let err = AppError::ResponseReadError(format!("{}", e));
+                            tracing::warn!("{}", err);
+                            last_err = Some(err);
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let err = if e.is_timeout() {
+                        AppError::TimeoutError(format!("请求超时: {}", e))
+                    } else {
+                        AppError::NetworkError(format!("{}", e))
+                    };
+                    tracing::warn!("{}", err);
+                    last_err = Some(err);
+                    continue;
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| AppError::NetworkError("请求失败: 未知错误".to_string())))
+    }
+
+    /// 下载文章中的图片到本地目录（并发下载，最多 5 张同时）
     ///
-    /// 遍历图片 URL 列表，逐个下载并保存到 `output_dir/images/` 目录。
+    /// 遍历图片 URL 列表，并发下载并保存到 `output_dir/images/` 目录。
+    /// 使用 Semaphore 限制最大并发数，避免被限流。
     /// 返回 URL → 本地文件名的映射，用于后续替换 Markdown 中的图片引用。
     /// 遇到下载失败的图片会跳过并记录日志，不会中断整体流程。
     pub async fn download_images(
@@ -120,48 +178,67 @@ impl WeixinScraper {
             .await
             .map_err(|e| AppError::IoError(format!("创建图片目录失败: {}", e)))?;
 
-        let mut url_to_file = HashMap::new();
+        // 并发下载，限制最多 5 张同时
+        let semaphore = Arc::new(Semaphore::new(5));
+        let client = Arc::new(self.client.clone());
+        let mut tasks = Vec::new();
         let mut file_idx = 0;
 
         for (idx, url) in images.iter().enumerate() {
-            // 跳过空 URL 和无效 URL
-            let url = url.trim();
+            let url = url.trim().to_string();
             if url.is_empty() {
                 tracing::warn!("跳过空图片 URL [{}]", idx);
                 continue;
             }
 
-            // 从 URL 推导文件名，使用连续编号避免跳号
-            let filename = self.image_filename(url, file_idx);
+            // 每个任务拿到自己的文件名和路径
+            let filename = self.image_filename(&url, file_idx);
             file_idx += 1;
             let save_path = images_dir.join(&filename);
+            let permit = Arc::clone(&semaphore);
+            let client = Arc::clone(&client);
 
-            tracing::info!("Downloading image [{}/{}]: {}", idx + 1, images.len(), url);
+            tasks.push(tokio::spawn(async move {
+                // 获取信号量许可，等待并发槽位
+                let _permit = permit.acquire().await.unwrap();
 
-            // 发送 HTTP 请求下载图片
-            match self.client.get(url).send().await {
-                Ok(response) => match response.bytes().await {
-                    Ok(bytes) => {
-                        // 写入本地文件
-                        if let Err(e) = fs::write(&save_path, &bytes).await {
-                            tracing::warn!("图片保存失败 [{}]: {}", filename, e);
-                            continue;
+                tracing::info!("Downloading image [{}]: {}", idx + 1, url);
+
+                match client.get(&url).send().await {
+                    Ok(response) => match response.bytes().await {
+                        Ok(bytes) => {
+                            if let Err(e) = fs::write(&save_path, &bytes).await {
+                                tracing::warn!("图片保存失败 [{}]: {}", filename, e);
+                                return None;
+                            }
+                            tracing::info!("图片下载成功 [{}]: {}", idx + 1, filename);
+                            Some((url, filename))
                         }
-                        url_to_file.insert(url.to_string(), filename);
-                    }
+                        Err(e) => {
+                            tracing::warn!("图片读取失败 [{}]: {}", url, e);
+                            None
+                        }
+                    },
                     Err(e) => {
-                        tracing::warn!("图片读取失败 [{}]: {}", url, e);
-                        continue;
+                        tracing::warn!("图片下载失败 [{}]: {}", url, e);
+                        None
                     }
-                },
-                Err(e) => {
-                    tracing::warn!("图片下载失败 [{}]: {}", url, e);
-                    continue;
                 }
+            }));
+        }
+
+        // 等待所有下载任务完成
+        let mut url_to_file = HashMap::new();
+        let mut success = 0u32;
+        let total = tasks.len();
+        for task in tasks {
+            if let Some((url, filename)) = task.await.unwrap_or(None) {
+                url_to_file.insert(url, filename);
+                success += 1;
             }
         }
 
-        tracing::info!("下载完成: {}/{} 张图片", url_to_file.len(), images.len());
+        tracing::info!("下载完成: {}/{} 张图片", success, total);
         Ok(url_to_file)
     }
 
@@ -233,5 +310,45 @@ impl WeixinScraper {
         } else {
             format!("image_{}.{}", idx, ext)
         }
+    }
+}
+
+// ── 单元测试 ──
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_image_filename_from_wx_fmt() {
+        let scraper = WeixinScraper::new();
+        let url = "https://mmbiz.qpic.cn/xxx?wx_fmt=png&other=1";
+        let name = scraper.image_filename(url, 0);
+        assert_eq!(name, "image_0.png");
+    }
+
+    #[test]
+    fn test_image_filename_from_url_path() {
+        let scraper = WeixinScraper::new();
+        let url = "https://example.com/image.jpg";
+        let name = scraper.image_filename(url, 0);
+        assert_eq!(name, "image.jpg");
+    }
+
+    #[test]
+    fn test_image_filename_unknown_ext_preserves_basename() {
+        let scraper = WeixinScraper::new();
+        let url = "https://example.com/image.unknown";
+        let name = scraper.image_filename(url, 5);
+        // 未知扩展名但 basename 自带扩展名，保留原文件名
+        assert_eq!(name, "image.unknown");
+    }
+
+    #[test]
+    fn test_image_filename_no_ext_defaults_to_jpg() {
+        let scraper = WeixinScraper::new();
+        let url = "https://example.com/image";
+        let name = scraper.image_filename(url, 3);
+        assert_eq!(name, "image_3.jpg");
     }
 }

@@ -17,6 +17,9 @@ use crate::scraper::WeixinScraper;
 pub struct ReadArticleRequest {
     #[schemars(description = "微信文章URL，格式: https://mp.weixin.qq.com/s/xxx")]
     pub url: String,
+
+    #[schemars(description = "输出目录（可选，默认 ./output/，也可通过环境变量 WEREAD_MCP_OUTPUT_DIR 设置）")]
+    pub output_dir: Option<String>,
 }
 
 /// 将字符串中的非法文件名字符替换为下划线（保留中文、字母、数字、常用符号）
@@ -93,15 +96,19 @@ impl WeixinServer {
                     "error": null
                 });
 
-                // 3. 自动输出到 ./output/<文章标题>/
+                // 3. 自动输出到目录（优先级: 工具参数 > 环境变量 > 默认 ./output/）
+                let base_dir = req
+                    .output_dir
+                    .filter(|d| !d.is_empty())
+                    .or_else(|| std::env::var("WEREAD_MCP_OUTPUT_DIR").ok().filter(|d| !d.is_empty()))
+                    .unwrap_or_else(|| "output".to_string());
                 let folder_name = sanitize_filename(&article.title);
                 let folder_name = if folder_name.is_empty() {
                     "untitled".to_string()
                 } else {
-                    // 截断过长标题，保留 80 字符
                     folder_name.chars().take(80).collect::<String>()
                 };
-                let output_path = Path::new("output").join(&folder_name);
+                let output_path = Path::new(&base_dir).join(&folder_name);
 
                 // 创建输出目录
                 if let Err(e) = tokio::fs::create_dir_all(&output_path).await {
@@ -204,5 +211,32 @@ impl ServerHandler for WeixinServer {
                 .build(),
             ..Default::default()
         }
+    }
+}
+
+// ── 单元测试 ──
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename_keeps_chinese() {
+        assert_eq!(sanitize_filename("一文讲透Skill"), "一文讲透Skill");
+    }
+
+    #[test]
+    fn test_sanitize_filename_replaces_special_chars() {
+        assert_eq!(sanitize_filename("8:00 AI 早报"), "8_00 AI 早报");
+    }
+
+    #[test]
+    fn test_sanitize_filename_trims_edges() {
+        assert_eq!(sanitize_filename("__hello__"), "hello");
+    }
+
+    #[test]
+    fn test_sanitize_filename_keeps_dot_and_hyphen() {
+        assert_eq!(sanitize_filename("hello-world.test"), "hello-world.test");
     }
 }
