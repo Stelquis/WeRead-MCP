@@ -116,31 +116,25 @@ impl WeixinParser {
         let content_markdown = self.content_to_markdown(&document);
 
         // 标题提取：多优先级兜底
-        // 1) 标准 CSS 选择器
-        // 2) og:title meta 标签
-        // 3) twitter:title meta 标签
+        // 1) og:title meta 标签（最可靠，微信文章发布时必填）
+        // 2) twitter:title meta 标签
+        // 3) 标准 CSS 选择器
+        // 4) 正文 Markdown 的第一个 # 标题（仅当其他方式都失败时）
         let title = {
-            let t = self.extract_text(&document, title_selectors(), "");
-            if !t.is_empty() {
-                t
-            } else if let Some(mt) = self.extract_meta_content(&document, "og:title") {
+            if let Some(mt) = self.extract_meta_content(&document, "og:title") {
                 mt
             } else if let Some(mt) = self.extract_meta_content(&document, "twitter:title") {
                 mt
             } else {
-                String::new()
+                let t = self.extract_text(&document, title_selectors(), "");
+                if !t.is_empty() {
+                    t
+                } else if let Some(h) = self.extract_first_heading(&content_markdown) {
+                    h
+                } else {
+                    String::new()
+                }
             }
-        };
-
-        // 如果正文 Markdown 的第一个 # 标题比提取的标题更长，取正文标题
-        let title = if let Some(h) = self.extract_first_heading(&content_markdown) {
-            if h.len() > title.len() {
-                h
-            } else {
-                title
-            }
-        } else {
-            title
         };
 
         let title = if title.is_empty() {
@@ -200,15 +194,22 @@ impl WeixinParser {
         elem_attr(el.value(), "content")
     }
 
-    /// 从 Markdown 内容中提取第一个 # 标题
+    /// 从 Markdown 内容中提取第一个 # 标题（跳过代码块内的假标题）
     fn extract_first_heading(&self, markdown: &str) -> Option<String> {
-        let line = markdown.lines().find(|l| l.starts_with("# "))?;
-        let heading = line.trim_start_matches("# ").trim().to_string();
-        if heading.is_empty() {
-            None
-        } else {
-            Some(heading)
+        let mut in_code_block = false;
+        for line in markdown.lines() {
+            if line.starts_with("```") {
+                in_code_block = !in_code_block;
+                continue;
+            }
+            if !in_code_block && line.starts_with("# ") {
+                let heading = line.trim_start_matches("# ").trim().to_string();
+                if !heading.is_empty() {
+                    return Some(heading);
+                }
+            }
         }
+        None
     }
 
     /// 提取正文纯文本（向后兼容）
