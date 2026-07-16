@@ -1,9 +1,6 @@
 # Rust build output
 target/
 
-# Generated article output
-output/
-
 # IDE/Editor
 .vscode/
 .idea/
