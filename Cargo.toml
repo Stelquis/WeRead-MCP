@@ -1,0 +1,39 @@
+[package]
+name = "weread-mcp"
+version = "1.0.0"
+edition = "2021"
+description = "WeRead MCP - Read WeChat articles via MCP protocol, pure HTTP, no browser needed"
+
+[dependencies]
+# MCP 协议 SDK（Anthropic 官方 Rust 实现）
+rmcp = { version = "0.16", features = [
+    "server",
+    "macros",
+    "transport-io",
+] }
+
+# HTTP 客户端（替代 Headless Chrome）
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+
+# HTML 解析 + CSS 选择器
+scraper = "0.22"
+
+# 正则表达式（清理文本）
+regex = "1"
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# JSON Schema 生成（rmcp tool 参数需要）
+schemars = "0.8"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# 错误处理
+thiserror = "2"
