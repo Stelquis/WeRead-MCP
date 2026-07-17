@@ -18,7 +18,9 @@ pub struct ReadArticleRequest {
     #[schemars(description = "微信文章URL，格式: https://mp.weixin.qq.com/s/xxx")]
     pub url: String,
 
-    #[schemars(description = "输出目录（可选，默认 ./output/，也可通过环境变量 WEREAD_MCP_OUTPUT_DIR 设置）")]
+    #[schemars(
+        description = "输出目录（可选，默认 ./output/，也可通过环境变量 WEREAD_MCP_OUTPUT_DIR 设置）"
+    )]
     pub output_dir: Option<String>,
 }
 
@@ -100,7 +102,11 @@ impl WeixinServer {
                 let base_dir = req
                     .output_dir
                     .filter(|d| !d.is_empty())
-                    .or_else(|| std::env::var("WEREAD_MCP_OUTPUT_DIR").ok().filter(|d| !d.is_empty()))
+                    .or_else(|| {
+                        std::env::var("WEREAD_MCP_OUTPUT_DIR")
+                            .ok()
+                            .filter(|d| !d.is_empty())
+                    })
                     .unwrap_or_else(|| "output".to_string());
                 let folder_name = sanitize_filename(&article.title);
                 let folder_name = if folder_name.is_empty() {

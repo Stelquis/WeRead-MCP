@@ -110,7 +110,12 @@ impl WeixinScraper {
         for attempt in 1..=max_retries {
             if attempt > 1 {
                 let delay = Duration::from_secs(3u64.pow(attempt as u32 - 2));
-                tracing::info!("重试 [{}/{}]: 等待 {:.1}s 后重试...", attempt, max_retries, delay.as_secs_f64());
+                tracing::info!(
+                    "重试 [{}/{}]: 等待 {:.1}s 后重试...",
+                    attempt,
+                    max_retries,
+                    delay.as_secs_f64()
+                );
                 tokio::time::sleep(delay).await;
             }
 
@@ -121,7 +126,11 @@ impl WeixinScraper {
                     if !response.status().is_success() {
                         let err = AppError::HttpStatusError {
                             status: response.status().as_u16(),
-                            message: response.status().canonical_reason().unwrap_or("unknown").to_string(),
+                            message: response
+                                .status()
+                                .canonical_reason()
+                                .unwrap_or("unknown")
+                                .to_string(),
                         };
                         tracing::warn!("{}", err);
                         last_err = Some(err);
