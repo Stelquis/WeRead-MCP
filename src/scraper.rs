@@ -80,12 +80,13 @@ impl WeixinScraper {
         {
             let cache = self.cache.lock().unwrap();
             if let Some(cached) = cache.get(url) {
-                tracing::info!("缓存命中: {}", url);
+                tracing::info!("[STAGE] 缓存命中: {}", url);
                 return Ok(cached.clone());
             }
         }
 
         // 2. 未命中，发起 HTTP 请求（带重试）
+        tracing::info!("[STAGE] 获取文章 HTML");
         let article = self.fetch_article_http(url).await?;
 
         // 3. 存入缓存
@@ -182,10 +183,13 @@ impl WeixinScraper {
         }
 
         // 创建图片存储目录
+        tracing::info!("[STAGE] 创建输出目录");
         let images_dir = output_dir.join("images");
         fs::create_dir_all(&images_dir)
             .await
             .map_err(|e| AppError::Io(format!("创建图片目录失败: {}", e)))?;
+
+        tracing::info!("[STAGE] 开始下载图片 (共 {} 张)", images.len());
 
         // 并发下载，限制最多 5 张同时
         let semaphore = Arc::new(Semaphore::new(5));
@@ -213,23 +217,34 @@ impl WeixinScraper {
 
                 tracing::info!("Downloading image [{}]: {}", idx + 1, url);
 
-                match client.get(&url).send().await {
-                    Ok(response) => match response.bytes().await {
-                        Ok(bytes) => {
-                            if let Err(e) = fs::write(&save_path, &bytes).await {
-                                tracing::warn!("图片保存失败 [{}]: {}", filename, e);
-                                return None;
+                // 每张图片最多等 10 秒，超时则跳过
+                let url_clone = url.clone();
+                let download = async move {
+                    match client.get(&url_clone).send().await {
+                        Ok(response) => match response.bytes().await {
+                            Ok(bytes) => {
+                                if let Err(e) = fs::write(&save_path, &bytes).await {
+                                    tracing::warn!("图片保存失败 [{}]: {}", filename, e);
+                                    return None;
+                                }
+                                tracing::info!("图片下载成功 [{}]: {}", idx + 1, filename);
+                                Some((url_clone, filename))
                             }
-                            tracing::info!("图片下载成功 [{}]: {}", idx + 1, filename);
-                            Some((url, filename))
-                        }
+                            Err(e) => {
+                                tracing::warn!("图片读取失败 [{}]: {}", url_clone, e);
+                                None
+                            }
+                        },
                         Err(e) => {
-                            tracing::warn!("图片读取失败 [{}]: {}", url, e);
+                            tracing::warn!("图片下载失败 [{}]: {}", url_clone, e);
                             None
                         }
-                    },
-                    Err(e) => {
-                        tracing::warn!("图片下载失败 [{}]: {}", url, e);
+                    }
+                };
+                match tokio::time::timeout(Duration::from_secs(10), download).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        tracing::warn!("图片下载超时 [{}], 已跳过: {}", idx + 1, url);
                         None
                     }
                 }
@@ -247,7 +262,7 @@ impl WeixinScraper {
             }
         }
 
-        tracing::info!("下载完成: {}/{} 张图片", success, total);
+        tracing::info!("[STAGE] 下载完成: {}/{} 张图片", success, total);
         Ok(url_to_file)
     }
 

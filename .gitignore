@@ -1,2 +1,5 @@
 # Rust build output
 target/
+
+# Python build output
+__pycache__/

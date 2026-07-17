@@ -134,7 +134,8 @@ impl WeixinServer {
                     match dl_result {
                         Ok(url_to_file) => {
                             // 写入 Markdown 文件（含本地图片路径）
-                            let md_result = self
+                            tracing::info!("[STAGE] 写入 Markdown 文件");
+                    let md_result = self
                                 .scraper
                                 .write_article_output(&article, &output_path, &url_to_file)
                                 .await;

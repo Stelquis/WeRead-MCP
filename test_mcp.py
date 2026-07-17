@@ -16,11 +16,15 @@ import os
 import time
 import argparse
 import signal
+import threading
 from pathlib import Path
 
 
 # 全局子进程引用，供信号处理器清理用
 _proc: subprocess.Popen | None = None
+
+# stderr 读取线程
+_stderr_thread: threading.Thread | None = None
 
 
 def _cleanup_proc():
@@ -43,6 +47,38 @@ def _signal_handler(signum, frame):
     sys.exit(128 + signum)
 
 
+def _read_stderr(proc):
+    """读取 stderr 并实时显示进度"""
+    stage_icons = {
+        "获取文章 HTML": "🌐",
+        "开始下载图片": "🖼️",
+        "下载完成": "✅",
+        "写入 Markdown 文件": "📝",
+        "创建输出目录": "📁",
+        "缓存命中": "⚡",
+    }
+    for line in iter(proc.stderr.readline, ""):
+        if not line:
+            break
+        line = line.strip()
+        # 只显示带 [STAGE] 标记的日志
+        if "[STAGE]" in line:
+            for keyword, icon in stage_icons.items():
+                if keyword in line:
+                    # 提取具体信息
+                    if "下载完成" in keyword:
+                        parts = line.split("下载完成: ")[-1] if "下载完成: " in line else ""
+                        print(f"  {icon} 图片下载完成 ({parts})")
+                    elif "开始下载图片" in keyword:
+                        parts = line.split("开始下载图片 ")[-1] if "开始下载图片 " in line else ""
+                        print(f"  {icon} 开始下载图片 {parts}")
+                    elif "缓存命中" in keyword:
+                        print(f"  {icon} 缓存命中，跳过获取")
+                    else:
+                        print(f"  {icon} {keyword}")
+                    break
+
+
 def send_msg(proc, msg):
     """Send a JSON-RPC message as a single line (NDJSON format)"""
     line = json.dumps(msg, ensure_ascii=False) + "\n"
@@ -51,9 +87,10 @@ def send_msg(proc, msg):
 
 
 def read_msg(proc, timeout=300):
-    """Read one JSON-RPC response line"""
+    """Read one JSON-RPC response line, with progress indicator"""
     start = time.time()
     line = ""
+    last_dot = 0.0
     while time.time() - start < timeout:
         ch = proc.stdout.read(1)
         if not ch:
@@ -61,7 +98,13 @@ def read_msg(proc, timeout=300):
         line += ch
         if ch == "\n":
             break
+        # 每 10 秒输出一个进度点
+        elapsed = time.time() - start
+        if elapsed - last_dot >= 10:
+            print(".", end="", flush=True)
+            last_dot = elapsed
     else:
+        print()  # 超时换行
         raise TimeoutError("timeout")
 
     line = line.strip()
@@ -95,6 +138,11 @@ def parse_args():
         help="结果 JSON 输出路径（默认: 不保存文件）",
     )
     parser.add_argument(
+        "--output-dir",
+        default=os.environ.get("WEREAD_MCP_OUTPUT_DIR", ""),
+        help="文章输出目录（传递给 MCP 工具的 output_dir 参数，默认: 使用服务器默认值 ./output/）",
+    )
+    parser.add_argument(
         "url",
         nargs="?",
         default="https://mp.weixin.qq.com/s/wm_LM83gyLM-auidBxprZw",
@@ -108,6 +156,7 @@ def main():
     binary = args.binary
     url = args.url
     output_path = args.output
+    output_dir = args.output_dir
 
     # 注册信号处理器，确保异常退出时清理子进程
     signal.signal(signal.SIGINT, _signal_handler)
@@ -117,6 +166,8 @@ def main():
     print(f"🚀 WeRead MCP 测试工具")
     print(f"   Binary: {binary}")
     print(f"   URL:    {url}")
+    if output_dir:
+        print(f"   Output Dir: {output_dir}")
     print("=" * 60)
 
     # 检查二进制是否存在
@@ -134,6 +185,11 @@ def main():
         text=True,
         bufsize=1,
     )
+
+    # 启动 stderr 读取线程，实时显示进度
+    global _stderr_thread
+    _stderr_thread = threading.Thread(target=_read_stderr, args=(_proc,), daemon=True)
+    _stderr_thread.start()
 
     time.sleep(0.5)
     if _proc.poll() is not None:
@@ -183,13 +239,20 @@ def main():
         # Step 4: Call read_weixin_article
         print(f"\n4. 调用 read_weixin_article...")
         print(f"   URL: {url}")
+        if output_dir:
+            print(f"   Output Dir: {output_dir}")
+
+        arguments = {"url": url}
+        if output_dir:
+            arguments["output_dir"] = output_dir
+
         send_msg(_proc, {
             "jsonrpc": "2.0",
             "id": 3,
             "method": "tools/call",
             "params": {
                 "name": "read_weixin_article",
-                "arguments": {"url": url}
+                "arguments": arguments,
             }
         })
 

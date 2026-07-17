@@ -478,6 +478,26 @@ impl WeixinParser {
                 parts.push("\n---\n\n".to_string());
             }
 
+            // 定义列表（dl/dt/dd）
+            "dl" => {
+                for child in elem.children() {
+                    if let Some(child_elem) = ElementRef::wrap(child) {
+                        let tag = &*child_elem.value().name.local;
+                        let inner = self.element_to_markdown(child_elem);
+                        let trimmed = inner.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        if tag == "dt" {
+                            parts.push(format!("**{}**\n", trimmed));
+                        } else if tag == "dd" {
+                            parts.push(format!("  {}\n", trimmed));
+                        }
+                    }
+                }
+                parts.push("\n".to_string());
+            }
+
             // 其他标签：透传子元素
             _ => {
                 let inner = self.element_to_markdown(elem);
@@ -494,9 +514,10 @@ impl WeixinParser {
     /// 将 `<li>` 转换为 `- `（无序）或 `1. `（有序）格式。
     fn process_list(&self, elem: ElementRef, ordered: bool, parts: &mut Vec<String>) {
         for (idx, child) in elem.children().enumerate() {
-            if let Some(li) = ElementRef::wrap(child) {
-                if li.value().name.local.as_ref() == "li" {
-                    let inner = self.element_to_markdown(li);
+            if let Some(child_elem) = ElementRef::wrap(child) {
+                let tag = &*child_elem.value().name.local;
+                if tag == "li" {
+                    let inner = self.element_to_markdown(child_elem);
                     let trimmed = inner.trim();
                     if !trimmed.is_empty() {
                         if ordered {
@@ -505,6 +526,18 @@ impl WeixinParser {
                             parts.push(format!("- {}", trimmed));
                         }
                         parts.push("\n".to_string());
+                    }
+                } else if tag == "ul" || tag == "ol" {
+                    // 嵌套列表：递归处理，缩进一级
+                    let nested_ordered = tag == "ol";
+                    let mut nested_parts = Vec::new();
+                    self.process_list(child_elem, nested_ordered, &mut nested_parts);
+                    for line in nested_parts {
+                        if line.trim().is_empty() {
+                            parts.push(line);
+                        } else {
+                            parts.push(format!("  {}", line));
+                        }
                     }
                 }
             }
