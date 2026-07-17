@@ -22,7 +22,7 @@ scraper = "0.22"
 regex = "1"
 
 # 异步运行时
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "time", "io-util"] }
+tokio = { version = "1", features = ["full"] }
 
 # 序列化
 serde = { version = "1", features = ["derive"] }

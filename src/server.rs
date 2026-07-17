@@ -90,8 +90,10 @@ impl WeixinServer {
                     "title": article.title,
                     "author": article.author,
                     "publish_time": article.publish_time,
+                    "content": article.content,
                     "content_markdown": article.content_markdown,
                     "images": article.images,
+                    "error": null
                 });
 
                 // 3. 自动输出到目录（优先级: 工具参数 > 环境变量 > 默认 ./output/）

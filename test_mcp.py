@@ -70,11 +70,6 @@ def parse_args():
         help="结果 JSON 输出路径（默认: 不保存文件）",
     )
     parser.add_argument(
-        "--output-dir",
-        default=os.environ.get("WEREAD_MCP_OUTPUT_DIR", ""),
-        help="文章输出目录（传递给 MCP 工具的 output_dir 参数，默认: 不指定，使用服务器默认值 ./output/）",
-    )
-    parser.add_argument(
         "url",
         nargs="?",
         default="https://mp.weixin.qq.com/s/wm_LM83gyLM-auidBxprZw",
@@ -88,14 +83,11 @@ def main():
     binary = args.binary
     url = args.url
     output_path = args.output
-    output_dir = args.output_dir
 
     print("=" * 60)
     print(f"🚀 WeRead MCP 测试工具")
     print(f"   Binary: {binary}")
     print(f"   URL:    {url}")
-    if output_dir:
-        print(f"   Output Dir: {output_dir}")
     print("=" * 60)
 
     # 检查二进制是否存在
@@ -158,20 +150,13 @@ def main():
     # Step 4: Call read_weixin_article
     print(f"\n4. 调用 read_weixin_article...")
     print(f"   URL: {url}")
-    if output_dir:
-        print(f"   Output Dir: {output_dir}")
-
-    arguments = {"url": url}
-    if output_dir:
-        arguments["output_dir"] = output_dir
-
     send_msg(proc, {
         "jsonrpc": "2.0",
         "id": 3,
         "method": "tools/call",
         "params": {
             "name": "read_weixin_article",
-            "arguments": arguments,
+            "arguments": {"url": url}
         }
     })
 

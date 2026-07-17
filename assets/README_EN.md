@@ -149,19 +149,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 `test_mcp.py` communicates with the server via the MCP protocol, saves results to `output.json` and prints to console. For polishing, you'll need to handle it separately.
 
-### Output Directory Configuration
-
-The output directory priority is: **tool parameter `output_dir` > environment variable `WEREAD_MCP_OUTPUT_DIR` > default `./output/`**
-
-```bash
-# Via environment variable
-export WEREAD_MCP_OUTPUT_DIR=/path/to/my-output
-./target/release/weread-mcp
-
-# Or via the Python test script
-python3 test_mcp.py --output-dir ./my-output https://mp.weixin.qq.com/s/xxx
-```
-
 ---
 
 ## 🏗️ Architecture

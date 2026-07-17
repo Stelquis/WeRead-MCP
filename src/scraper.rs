@@ -6,37 +6,26 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use reqwest::Client;
 use tokio::fs;
 use tokio::sync::Semaphore;
 
 use crate::error::AppError;
-use crate::parser::ArticleData;
+use crate::parser::{ArticleData, WeixinParser};
 
 /// 内存缓存大小上限（最多缓存 50 篇文章）
 const CACHE_MAX_SIZE: usize = 50;
-
-/// 缓存 TTL（30 分钟）
-const CACHE_TTL: Duration = Duration::from_secs(1800);
-
-/// 缓存条目
-struct CacheEntry {
-    data: ArticleData,
-    cached_at: Instant,
-}
-
-/// 图片下载重试次数
-const IMAGE_DOWNLOAD_RETRIES: u32 = 2;
 
 /// HTTP 请求管理器
 ///
 /// 使用纯 HTTP 请求获取文章 HTML，无需 Chrome/Chromium 浏览器。
 /// 包含一个简单的内存缓存，避免重复请求相同 URL。
 pub struct WeixinScraper {
+    parser: WeixinParser,
     client: Client,
-    cache: std::sync::Mutex<HashMap<String, CacheEntry>>,
+    cache: std::sync::Mutex<HashMap<String, ArticleData>>,
 }
 
 impl WeixinScraper {
@@ -76,6 +65,7 @@ impl WeixinScraper {
             .expect("Failed to build HTTP client");
 
         Self {
+            parser: WeixinParser::new(),
             client,
             cache: std::sync::Mutex::new(HashMap::new()),
         }
@@ -83,21 +73,15 @@ impl WeixinScraper {
 
     /// 获取微信文章内容（带缓存 + 重试）
     ///
-    /// 先检查内存缓存（超时条目视为未命中），命中则直接返回。
-    /// 未命中则发送 HTTP 请求，网络错误和非 200 状态码会触发重试（指数退避: 1s → 3s → 9s）。
+    /// 先检查内存缓存，命中则直接返回。未命中则发送 HTTP 请求，
+    /// 网络错误和非 200 状态码会触发重试（指数退避: 1s → 3s → 9s）。
     pub async fn fetch_article(&self, url: &str) -> Result<ArticleData, AppError> {
-        // 1. 检查缓存（TTL 过期视为未命中）
+        // 1. 检查缓存
         {
-            let mut cache = self.cache.lock().unwrap();
-            if let Some(entry) = cache.get(url) {
-                if entry.cached_at.elapsed() < CACHE_TTL {
-                    tracing::info!("缓存命中: {}", url);
-                    return Ok(entry.data.clone());
-                } else {
-                    // 缓存过期，移除以节省内存
-                    cache.remove(url);
-                    tracing::info!("缓存过期: {}", url);
-                }
+            let cache = self.cache.lock().unwrap();
+            if let Some(cached) = cache.get(url) {
+                tracing::info!("缓存命中: {}", url);
+                return Ok(cached.clone());
             }
         }
 
@@ -112,13 +96,7 @@ impl WeixinScraper {
                 cache.clear();
                 tracing::info!("缓存已满，已清空");
             }
-            cache.insert(
-                url.to_string(),
-                CacheEntry {
-                    data: article.clone(),
-                    cached_at: Instant::now(),
-                },
-            );
+            cache.insert(url.to_string(), article.clone());
         }
 
         Ok(article)
@@ -153,7 +131,7 @@ impl WeixinScraper {
                     match response.text().await {
                         Ok(html) => {
                             tracing::info!("获取成功 ({} bytes), 正在解析...", html.len());
-                            return Ok(crate::parser::parse(&html));
+                            return Ok(self.parser.parse(&html));
                         }
                         Err(e) => {
                             let err = AppError::ResponseReadError(format!("{}", e));
@@ -226,35 +204,26 @@ impl WeixinScraper {
 
                 tracing::info!("Downloading image [{}]: {}", idx + 1, url);
 
-                // 带重试的图片下载
-                for retry in 0..IMAGE_DOWNLOAD_RETRIES {
-                    if retry > 0 {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        tracing::info!("图片重试 [{}/{}]: {}", retry, IMAGE_DOWNLOAD_RETRIES - 1, url);
-                    }
-
-                    match client.get(&url).send().await {
-                        Ok(response) => match response.bytes().await {
-                            Ok(bytes) => {
-                                if let Err(e) = fs::write(&save_path, &bytes).await {
-                                    tracing::warn!("图片保存失败 [{}]: {}", filename, e);
-                                    break;
-                                }
-                                tracing::info!("图片下载成功 [{}]: {}", idx + 1, filename);
-                                return Some((url, filename));
+                match client.get(&url).send().await {
+                    Ok(response) => match response.bytes().await {
+                        Ok(bytes) => {
+                            if let Err(e) = fs::write(&save_path, &bytes).await {
+                                tracing::warn!("图片保存失败 [{}]: {}", filename, e);
+                                return None;
                             }
-                            Err(e) => {
-                                tracing::warn!("图片读取失败 [{}]: {}", url, e);
-                                continue;
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!("图片下载失败 [{}]: {}", url, e);
-                            continue;
+                            tracing::info!("图片下载成功 [{}]: {}", idx + 1, filename);
+                            Some((url, filename))
                         }
+                        Err(e) => {
+                            tracing::warn!("图片读取失败 [{}]: {}", url, e);
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("图片下载失败 [{}]: {}", url, e);
+                        None
                     }
                 }
-                None
             }));
         }
 
@@ -305,9 +274,6 @@ impl WeixinScraper {
     /// 优先从 `wx_fmt` 参数取扩展名，兜底从 URL 路径取。
     /// 只识别已知的图片格式（jpg/jpeg/png/gif/webp/bmp/svg/ico），
     /// 未知格式或 `other` 时默认使用 `jpg`。
-    ///
-    /// 当 `wx_fmt` 存在且与 basename 扩展名不一致时，生成 `image_N.ext` 格式
-    /// 以避免扩展名不匹配（如 URL 路径为 `.jpg` 但 `wx_fmt=png`）。
     fn image_filename(&self, url: &str, idx: usize) -> String {
         // 去掉 query string，取最后一段路径作为 basename
         let url_path = url.split('?').next().unwrap_or(url);
@@ -320,8 +286,8 @@ impl WeixinScraper {
         // 已知的图片扩展名白名单
         const KNOWN_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"];
 
-        // 从 wx_fmt 参数取扩展名（微信图片 URL 常用，优先级最高）
-        let wx_fmt_ext = url
+        // 优先从 wx_fmt 参数取扩展名，不在白名单则从 URL 路径取
+        let ext = url
             .split('?')
             .nth(1)
             .and_then(|q| {
@@ -329,27 +295,17 @@ impl WeixinScraper {
                     .find(|p| p.starts_with("wx_fmt="))
                     .map(|p| &p[7..])
             })
-            .filter(|e| KNOWN_EXTS.contains(e));
+            .filter(|e| KNOWN_EXTS.contains(e))
+            .or_else(|| {
+                basename
+                    .rsplit('.')
+                    .next()
+                    .filter(|e| KNOWN_EXTS.contains(e))
+            })
+            .unwrap_or("jpg");
 
-        // 从 URL 路径取扩展名
-        let path_ext = basename
-            .rsplit('.')
-            .next()
-            .filter(|e| KNOWN_EXTS.contains(e));
-
-        // 优先使用 wx_fmt 的扩展名
-        let ext = wx_fmt_ext.or(path_ext).unwrap_or("jpg");
-
-        // 决定是否使用 basename 作为文件名
-        let use_basename = if wx_fmt_ext.is_some() {
-            // 有 wx_fmt：仅当 basename 扩展名与 wx_fmt 一致时才保留原文件名
-            basename.contains('.') && path_ext == wx_fmt_ext
-        } else {
-            // 无 wx_fmt：basename 有扩展名就保留
-            basename.contains('.')
-        };
-
-        if use_basename {
+        // basename 自带扩展名则直接使用，否则生成 image_N.ext 格式
+        if basename.contains('.') && ext.len() <= 5 {
             basename.to_string()
         } else {
             format!("image_{}.{}", idx, ext)

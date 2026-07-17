@@ -148,19 +148,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 `test_mcp.py` 会按 MCP 协议与服务器通信，将结果保存到 `output.json` 并打印到控制台。如需润色，需自行处理。
 
-### 输出目录配置
-
-输出目录的优先级：**工具参数 `output_dir` > 环境变量 `WEREAD_MCP_OUTPUT_DIR` > 默认值 `./output/`**
-
-```bash
-# 通过环境变量设置
-export WEREAD_MCP_OUTPUT_DIR=/path/to/my-output
-./target/release/weread-mcp
-
-# 或通过 Python 测试脚本指定
-python3 test_mcp.py --output-dir ./my-output https://mp.weixin.qq.com/s/xxx
-```
-
 ---
 
 ## 🏗️ 架构

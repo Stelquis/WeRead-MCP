@@ -14,6 +14,8 @@ pub struct ArticleData {
     pub title: String,
     pub author: String,
     pub publish_time: String,
+    /// 纯文本正文（向后兼容）
+    pub content: String,
     /// Markdown 格式正文（保留标题/列表/引用/图片等结构）
     pub content_markdown: String,
     /// 正文中的图片 URL 列表
@@ -81,26 +83,37 @@ fn spaces_regex() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r" {2,}").unwrap())
 }
 
-/// 解析微信文章 HTML，提取全部结构化数据
+/// 微信文章 HTML 解析器
 ///
-/// 支持：
+/// 将 HTML 转换为结构化数据，支持：
 /// - 多选择器兜底提取标题/作者/时间
 /// - HTML → Markdown 格式转换（保留标题、列表、引用、图片、表格、公式）
 /// - 图片 URL 自动提取
-///
-/// 执行流程：
-/// 1. 提取标题（标准选择器 → meta og:title → meta twitter:title）
-/// 2. 提取作者、发布时间
-/// 3. 提取正文 Markdown 和图片
-/// 4. 标题反补：如果正文第一个 H1 比提取的标题更长，取正文标题
-/// 5. 发布时间兜底：从 meta 标签取
-pub fn parse(html: &str) -> ArticleData {
+pub struct WeixinParser;
+
+impl WeixinParser {
+    /// 创建解析器实例
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// 解析微信文章 HTML，提取全部结构化数据
+    ///
+    /// 执行流程：
+    /// 1. 提取标题（标准选择器 → meta og:title → meta twitter:title）
+    /// 2. 提取作者、发布时间
+    /// 3. 提取正文纯文本和 Markdown
+    /// 4. 提取图片 URL 列表
+    /// 5. 标题反补：如果正文第一个 H1 比提取的标题更长，取正文标题
+    /// 6. 发布时间兜底：从 meta 标签取
+    pub fn parse(&self, html: &str) -> ArticleData {
         let document = Html::parse_document(html);
 
-        let author = extract_text(&document, author_selectors(), "未知作者");
-        let publish_time = extract_text(&document, publish_time_selectors(), "");
-        let images = extract_images(&document);
-        let content_markdown = content_to_markdown(&document);
+        let author = self.extract_text(&document, author_selectors(), "未知作者");
+        let publish_time = self.extract_text(&document, publish_time_selectors(), "");
+        let images = self.extract_images(&document);
+        let content = self.extract_content_plain(&document);
+        let content_markdown = self.content_to_markdown(&document);
 
         // 标题提取：多优先级兜底
         // 1) og:title meta 标签（最可靠，微信文章发布时必填）
@@ -108,16 +121,16 @@ pub fn parse(html: &str) -> ArticleData {
         // 3) 标准 CSS 选择器
         // 4) 正文 Markdown 的第一个 # 标题（仅当其他方式都失败时）
         let title = {
-            if let Some(mt) = extract_meta_content(&document, "og:title") {
+            if let Some(mt) = self.extract_meta_content(&document, "og:title") {
                 mt
-            } else if let Some(mt) = extract_meta_content(&document, "twitter:title") {
+            } else if let Some(mt) = self.extract_meta_content(&document, "twitter:title") {
                 mt
             } else {
-                let t = extract_text(&document, title_selectors(), "");
+                let t = self.extract_text(&document, title_selectors(), "");
                 if !t.is_empty() {
                     t
                 } else {
-                    extract_first_heading(&content_markdown)
+                    self.extract_first_heading(&content_markdown)
                         .unwrap_or_default()
                 }
             }
@@ -139,8 +152,9 @@ pub fn parse(html: &str) -> ArticleData {
         // 发布时间兜底：尝试 meta 标签
         let publish_time = if !publish_time.is_empty() {
             publish_time
-        } else if let Some(t) = extract_meta_content(&document, "article:published_time")
-            .or_else(|| extract_meta_content(&document, "og:updated_time"))
+        } else if let Some(t) = self
+            .extract_meta_content(&document, "article:published_time")
+            .or_else(|| self.extract_meta_content(&document, "og:updated_time"))
         {
             t
         } else {
@@ -151,6 +165,7 @@ pub fn parse(html: &str) -> ArticleData {
             title,
             author,
             publish_time,
+            content,
             content_markdown,
             images,
         }
@@ -159,7 +174,7 @@ pub fn parse(html: &str) -> ArticleData {
     // ── 通用提取方法 ──
 
     /// 通用文本提取：按选择器列表逐个尝试，取第一个非空结果
-    fn extract_text(doc: &Html, selectors: &[Selector], fallback: &str) -> String {
+    fn extract_text(&self, doc: &Html, selectors: &[Selector], fallback: &str) -> String {
         for sel in selectors {
             if let Some(el) = doc.select(sel).next() {
                 let text = el.text().collect::<Vec<_>>().join("").trim().to_string();
@@ -172,7 +187,7 @@ pub fn parse(html: &str) -> ArticleData {
     }
 
     /// 从 `<meta property="xxx">` 标签提取 `content` 属性值
-    fn extract_meta_content(doc: &Html, property: &str) -> Option<String> {
+    fn extract_meta_content(&self, doc: &Html, property: &str) -> Option<String> {
         let selector_str = format!("meta[property='{}']", property);
         let sel = Selector::parse(&selector_str).ok()?;
         let el = doc.select(&sel).next()?;
@@ -180,7 +195,7 @@ pub fn parse(html: &str) -> ArticleData {
     }
 
     /// 从 Markdown 内容中提取第一个 # 标题（跳过代码块内的假标题）
-    fn extract_first_heading(markdown: &str) -> Option<String> {
+    fn extract_first_heading(&self, markdown: &str) -> Option<String> {
         let mut in_code_block = false;
         for line in markdown.lines() {
             if line.starts_with("```") {
@@ -197,10 +212,32 @@ pub fn parse(html: &str) -> ArticleData {
         None
     }
 
+    /// 提取正文纯文本（向后兼容）
+    ///
+    /// 从正文容器中提取纯文本，移除所有 HTML 标签。
+    fn extract_content_plain(&self, doc: &Html) -> String {
+        for sel in content_selectors() {
+            if let Some(content_el) = doc.select(sel).next() {
+                let inner_html = content_el.inner_html();
+                let fragment = Html::parse_fragment(&inner_html);
+                let text: String = fragment
+                    .root_element()
+                    .text()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let cleaned = self.clean_text(&text);
+                if !cleaned.is_empty() {
+                    return cleaned;
+                }
+            }
+        }
+        "未找到正文内容".to_string()
+    }
+
     /// 提取正文中所有图片的真实 URL
     ///
     /// 微信使用懒加载：真实 URL 在 `data-src`，`src` 可能是 base64 占位图。
-    fn extract_images(doc: &Html) -> Vec<String> {
+    fn extract_images(&self, doc: &Html) -> Vec<String> {
         let img_selector = Selector::parse("img").unwrap();
         let mut images = Vec::new();
         for el in doc.select(&img_selector) {
@@ -219,13 +256,13 @@ pub fn parse(html: &str) -> ArticleData {
     /// 将正文 HTML 转换为 Markdown
     ///
     /// 从正文容器中提取 HTML，递归遍历 DOM 树转换为 Markdown。
-    fn content_to_markdown(doc: &Html) -> String {
+    fn content_to_markdown(&self, doc: &Html) -> String {
         for sel in content_selectors() {
             if let Some(content_el) = doc.select(sel).next() {
                 let inner_html = content_el.inner_html();
                 let fragment = Html::parse_fragment(&inner_html);
-                let result = element_to_markdown(fragment.root_element());
-                let cleaned = clean_text(&result);
+                let result = self.element_to_markdown(fragment.root_element());
+                let cleaned = self.clean_text(&result);
                 if !cleaned.is_empty() {
                     return cleaned;
                 }
@@ -237,7 +274,7 @@ pub fn parse(html: &str) -> ArticleData {
     /// 递归转换 ElementRef 及其子节点为 Markdown 字符串
     ///
     /// 遍历所有子节点，文本节点直接拼接，元素节点调用 `push_element_markdown` 处理。
-    fn element_to_markdown(elem: ElementRef) -> String {
+    fn element_to_markdown(&self, elem: ElementRef) -> String {
         let mut parts = Vec::new();
         for child in elem.children() {
             match child.value() {
@@ -249,7 +286,7 @@ pub fn parse(html: &str) -> ArticleData {
                 }
                 Node::Element(_) => {
                     if let Some(child_elem) = ElementRef::wrap(child) {
-                        push_element_markdown(child_elem, &mut parts);
+                        self.push_element_markdown(child_elem, &mut parts);
                     }
                 }
                 _ => {}
@@ -272,13 +309,13 @@ pub fn parse(html: &str) -> ArticleData {
     /// - 表格：table → Markdown 表格
     /// - 公式：span.math → $formula$ / $$formula$$
     /// - 其他：br/h/透传子元素
-    fn push_element_markdown(elem: ElementRef, parts: &mut Vec<String>) {
+    fn push_element_markdown(&self, elem: ElementRef, parts: &mut Vec<String>) {
         let el = elem.value();
         let tag = &*el.name.local;
         match tag {
             // 块级元素：段落，末尾加双换行
             "p" | "section" | "div" => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     // 纯粗体段落视为 H3 子标题
@@ -299,7 +336,7 @@ pub fn parse(html: &str) -> ArticleData {
             // 标题：h1 跳过（保留给文章标题），h2~h6 正常映射
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 let level = tag[1..].parse::<usize>().unwrap_or(1);
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     if level == 1 {
@@ -332,7 +369,7 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 粗体
             "strong" | "b" => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     parts.push(format!("**{}**", trimmed));
@@ -341,7 +378,7 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 斜体
             "em" | "i" => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     parts.push(format!("*{}*", trimmed));
@@ -351,7 +388,7 @@ pub fn parse(html: &str) -> ArticleData {
             // 链接
             "a" => {
                 let href = elem_attr(el, "href").unwrap_or_default();
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim().to_string();
                 if !trimmed.is_empty() && !href.is_empty() {
                     parts.push(format!("[{}]({})", trimmed, href));
@@ -362,7 +399,7 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 行内代码
             "code" => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     parts.push(format!("`{}`", trimmed));
@@ -380,7 +417,7 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 引用
             "blockquote" => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     let quoted: Vec<String> = trimmed.lines().map(|l| format!("> {}", l)).collect();
@@ -391,12 +428,12 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 列表
             "ul" | "ol" => {
-                process_list(elem, tag == "ol", parts);
+                self.process_list(elem, tag == "ol", parts);
             }
 
             // 表格
             "table" => {
-                process_table(elem, parts);
+                self.process_table(elem, parts);
             }
 
             // 数学公式（MathJax / KaTeX 渲染）
@@ -407,7 +444,7 @@ pub fn parse(html: &str) -> ArticleData {
                     || class_attr.contains("katex")
                     || class_attr.contains("formula")
                 {
-                    let inner = element_to_markdown(elem);
+                    let inner = self.element_to_markdown(elem);
                     let trimmed = inner.trim();
                     if !trimmed.is_empty() {
                         let is_inline = class_attr.contains("inline") || tag == "span";
@@ -419,7 +456,7 @@ pub fn parse(html: &str) -> ArticleData {
                     }
                 } else {
                     // 普通 span，透传子元素
-                    let inner = element_to_markdown(elem);
+                    let inner = self.element_to_markdown(elem);
                     let trimmed = inner.trim();
                     if !trimmed.is_empty() {
                         parts.push(trimmed.to_string());
@@ -429,7 +466,7 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 表格行/单元格：由 process_table 统一处理，递归时跳过加粗等样式
             "tr" | "th" | "td" | "thead" | "tbody" | "tfoot" | "caption" | "colgroup" | "col" => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     parts.push(trimmed.to_string());
@@ -443,7 +480,7 @@ pub fn parse(html: &str) -> ArticleData {
 
             // 其他标签：透传子元素
             _ => {
-                let inner = element_to_markdown(elem);
+                let inner = self.element_to_markdown(elem);
                 let trimmed = inner.trim();
                 if !trimmed.is_empty() {
                     parts.push(trimmed.to_string());
@@ -455,11 +492,11 @@ pub fn parse(html: &str) -> ArticleData {
     /// 处理列表（ul/ol）
     ///
     /// 将 `<li>` 转换为 `- `（无序）或 `1. `（有序）格式。
-    fn process_list(elem: ElementRef, ordered: bool, parts: &mut Vec<String>) {
+    fn process_list(&self, elem: ElementRef, ordered: bool, parts: &mut Vec<String>) {
         for (idx, child) in elem.children().enumerate() {
             if let Some(li) = ElementRef::wrap(child) {
                 if li.value().name.local.as_ref() == "li" {
-                    let inner = element_to_markdown(li);
+                    let inner = self.element_to_markdown(li);
                     let trimmed = inner.trim();
                     if !trimmed.is_empty() {
                         if ordered {
@@ -483,7 +520,7 @@ pub fn parse(html: &str) -> ArticleData {
     /// |-------|-------|
     /// | 单元格 | 单元格 |
     /// ```
-    fn process_table(elem: ElementRef, parts: &mut Vec<String>) {
+    fn process_table(&self, elem: ElementRef, parts: &mut Vec<String>) {
         let mut rows: Vec<Vec<String>> = Vec::new();
         let mut max_cols = 0;
 
@@ -497,7 +534,7 @@ pub fn parse(html: &str) -> ArticleData {
                         if let Some(cell_elem) = ElementRef::wrap(cell) {
                             let cell_tag = &*cell_elem.value().name.local;
                             if cell_tag == "th" || cell_tag == "td" {
-                                let inner = element_to_markdown(cell_elem);
+                                let inner = self.element_to_markdown(cell_elem);
                                 let text = inner.trim().to_string();
                                 cells.push(text);
                             }
@@ -545,11 +582,12 @@ pub fn parse(html: &str) -> ArticleData {
     // ── 文本清理 ──
 
     /// 合并多余换行和空格
-    fn clean_text(text: &str) -> String {
+    fn clean_text(&self, text: &str) -> String {
         let text = newlines_regex().replace_all(text, "\n\n");
         let text = spaces_regex().replace_all(&text, " ");
         text.trim().to_string()
     }
+}
 
 // ── 工具函数 ──
 
@@ -569,33 +607,38 @@ mod tests {
 
     #[test]
     fn test_extract_first_heading_skips_code_blocks() {
+        let parser = WeixinParser::new();
         let md = "一些正文\n\n```\n# 这是代码块内的标题\n```\n\n# 这是真正的标题";
         assert_eq!(
-            extract_first_heading(md),
+            parser.extract_first_heading(md),
             Some("这是真正的标题".to_string())
         );
     }
 
     #[test]
     fn test_extract_first_heading_no_heading() {
+        let parser = WeixinParser::new();
         let md = "只有正文，没有标题";
-        assert_eq!(extract_first_heading(md), None);
+        assert_eq!(parser.extract_first_heading(md), None);
     }
 
     #[test]
     fn test_extract_first_heading_empty() {
-        assert_eq!(extract_first_heading(""), None);
+        let parser = WeixinParser::new();
+        assert_eq!(parser.extract_first_heading(""), None);
     }
 
     #[test]
     fn test_clean_text_collapses_newlines() {
-        let result = clean_text("hello\n\n\n\nworld");
+        let parser = WeixinParser::new();
+        let result = parser.clean_text("hello\n\n\n\nworld");
         assert_eq!(result, "hello\n\nworld");
     }
 
     #[test]
     fn test_clean_text_collapses_spaces() {
-        let result = clean_text("hello    world");
+        let parser = WeixinParser::new();
+        let result = parser.clean_text("hello    world");
         assert_eq!(result, "hello world");
     }
 }
