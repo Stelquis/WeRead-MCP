@@ -1,2 +1,5 @@
 # Rust build output
 target/
+
+# WeRead MCP article output
+output/

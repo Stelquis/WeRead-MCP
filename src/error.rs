@@ -23,12 +23,4 @@ pub enum AppError {
     /// 文件 I/O 操作失败（读写目录、保存图片等）
     #[error("IO 错误: {0}")]
     IoError(String),
-
-    /// 图片下载失败
-    #[error("图片下载失败: {0}")]
-    ImageDownloadError(String),
-
-    /// URL 格式错误
-    #[error("URL 格式错误: {0}")]
-    InvalidUrlError(String),
 }
