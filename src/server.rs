@@ -60,7 +60,7 @@ impl WeixinServer {
 impl WeixinServer {
     /// 读取微信公众号文章内容
     #[tool(
-        description = "读取微信公众号文章内容。接收一个微信文章 URL，提取结构化内容（标题、作者、正文 Markdown、图片列表）。URL 必须以 https://mp.weixin.qq.com/s/ 开头。自动将文章 Markdown 和图片下载到 ./output/<文章标题>/ 目录下。返回：title, author, publish_time, content(纯文本), content_markdown(带格式), images(图片URL列表), output(本地文件路径信息)。\n\n【AI 处理流程】当你拿到返回的 content_markdown 和 output.markdown_path 后，请按以下步骤处理：\n1. 读取 output.markdown_path 指向的 article.md 文件（包含完整正文和本地图片引用）\n2. 从头到尾通读全文，理解文章结构和内容逻辑\n3. 对 Markdown 进行排版优化：\n   - 确保标题层级合理（H1 文章标题、H2 章节、H3 子章节）\n   - 修正代码块、引用、列表的格式\n   - 合并/拆分过短或过长的段落\n   - 修正图片 alt 文本为空的问题\n4. 对内容进行润色：\n   - 修正明显的中英文标点混用\n   - 统一术语表述\n   - 修复明显的排版错误（多余空格、换行等）\n5. 输出最终润色后的 Markdown 内容"
+        description = "读取微信公众号文章内容。接收一个微信文章 URL，提取结构化内容（标题、作者、正文 Markdown、图片列表）。URL 必须以 https://mp.weixin.qq.com/s/ 开头。自动将文章 Markdown 和图片下载到 ./output/<文章标题>/ 目录下。返回：title, author, publish_time, content(纯文本), content_markdown(带格式), images(图片URL列表), output(本地文件路径信息)。\n\n【AI 处理流程】当你拿到返回的 content_markdown 和 output.markdown_path 后，请按以下步骤处理：\n1. 读取 output.markdown_path 指向的 article.md 文件（包含完整正文和本地图片引用）\n2. 从头到尾通读全文，理解文章结构和内容逻辑\n3. 对 Markdown 进行排版优化：\n   - 确保标题层级合理（H1 文章标题、H2 章节、H3 子章节）\n   - 修正代码块、引用、列表的格式\n   - 合并/拆分过短或过长的段落\n   - 修正图片 alt 文本为空的问题\n4. 对内容进行润色：\n   - 修正明显的中英文标点混用\n   - 统一术语表述\n   - 修复明显的排版错误（多余空格、换行等）\n5. ⚠️ 重要约束：上述排版优化和润色过程中，必须保留全部原始内容，不得删除任何段落、章节、公式、示例或图片引用。只修正排版和语言，不删减信息量。\n6. 将文章的大标题（H1）改为超链接格式，格式为 `# [标题文字](原始URL)`，链接到原始微信文章 URL（即本次调用时传入的 URL）\n7. 输出最终润色后的 Markdown 内容"
     )]
     async fn read_weixin_article(&self, Parameters(req): Parameters<ReadArticleRequest>) -> String {
         let url = req.url;
@@ -135,7 +135,7 @@ impl WeixinServer {
                         Ok(url_to_file) => {
                             // 写入 Markdown 文件（含本地图片路径）
                             tracing::info!("[STAGE] 写入 Markdown 文件");
-                    let md_result = self
+                            let md_result = self
                                 .scraper
                                 .write_article_output(&article, &output_path, &url_to_file)
                                 .await;
@@ -209,8 +209,9 @@ impl ServerHandler for WeixinServer {
                     - 修正中英文标点混用\n\
                     - 统一术语表述\n\
                     - 修复多余空格、换行等排版错误\n\
-                 7. 将文章的大标题（H1）改为超链接格式，格式为 `# [标题文字](原始URL)`，链接到原始微信文章 URL（即第 1 步传入的 URL）\n\
-                 8. 将润色后的内容写回 article.md，输出最终结果"
+                 7. ⚠️ 重要约束：上述排版优化和润色过程中，必须保留全部原始内容，不得删除任何段落、章节、公式、示例或图片引用。只修正排版和语言，不删减信息量。\n\
+                 8. 将文章的大标题（H1）改为超链接格式，格式为 `# [标题文字](原始URL)`，链接到原始微信文章 URL（即第 1 步传入的 URL）\n\
+                 9. 将润色后的内容写回 article.md，输出最终结果"
                     .into(),
             ),
             capabilities: ServerCapabilities::builder()
