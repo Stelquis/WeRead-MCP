@@ -124,7 +124,7 @@ impl WeixinScraper {
             match self.client.get(url).send().await {
                 Ok(response) => {
                     if !response.status().is_success() {
-                        let err = AppError::HttpStatusError {
+                        let err = AppError::HttpStatus {
                             status: response.status().as_u16(),
                             message: response
                                 .status()
@@ -143,7 +143,7 @@ impl WeixinScraper {
                             return Ok(self.parser.parse(&html));
                         }
                         Err(e) => {
-                            let err = AppError::ResponseReadError(format!("{}", e));
+                            let err = AppError::ResponseRead(format!("{}", e));
                             tracing::warn!("{}", err);
                             last_err = Some(err);
                             continue;
@@ -152,9 +152,9 @@ impl WeixinScraper {
                 }
                 Err(e) => {
                     let err = if e.is_timeout() {
-                        AppError::TimeoutError(format!("请求超时: {}", e))
+                        AppError::Timeout(format!("请求超时: {}", e))
                     } else {
-                        AppError::NetworkError(format!("{}", e))
+                        AppError::Network(format!("{}", e))
                     };
                     tracing::warn!("{}", err);
                     last_err = Some(err);
@@ -163,7 +163,7 @@ impl WeixinScraper {
             }
         }
 
-        Err(last_err.unwrap_or_else(|| AppError::NetworkError("请求失败: 未知错误".to_string())))
+        Err(last_err.unwrap_or_else(|| AppError::Network("请求失败: 未知错误".to_string())))
     }
 
     /// 下载文章中的图片到本地目录（并发下载，最多 5 张同时）
@@ -185,7 +185,7 @@ impl WeixinScraper {
         let images_dir = output_dir.join("images");
         fs::create_dir_all(&images_dir)
             .await
-            .map_err(|e| AppError::IoError(format!("创建图片目录失败: {}", e)))?;
+            .map_err(|e| AppError::Io(format!("创建图片目录失败: {}", e)))?;
 
         // 并发下载，限制最多 5 张同时
         let semaphore = Arc::new(Semaphore::new(5));
@@ -272,7 +272,7 @@ impl WeixinScraper {
         let md_path = output_dir.join("article.md");
         fs::write(&md_path, &md)
             .await
-            .map_err(|e| AppError::IoError(format!("Markdown 写入失败: {}", e)))?;
+            .map_err(|e| AppError::Io(format!("Markdown 写入失败: {}", e)))?;
 
         tracing::info!("Markdown 已保存: {}", md_path.display());
         Ok(md_path.to_string_lossy().to_string())
